@@ -114,10 +114,10 @@ with tf.Session() as sess:
 	sess.run(tf.global_variables_initializer())
 	for qsy in range(1):
 		# Start training
-		for i in range(20000):
+		for i in range(10000):
 			# Get scale value and then binarize weights
-			sess.run(scale_step1)
-			sess.run(scale_step2)
+			#sess.run(scale_step1)
+			#sess.run(scale_step2)
 			sess.run(bin_steps)
 			
 			batch = mnist.train.next_batch(50)

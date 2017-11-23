@@ -3,6 +3,9 @@ mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
 
 import tensorflow as tf
 
+import numpy
+numpy.set_printoptions(threshold=numpy.nan)
+
 def weight_variable(shape):
 	initial = tf.truncated_normal(shape, stddev=0.1)
 	return tf.Variable(initial)
@@ -26,6 +29,12 @@ def binarize_all():
 		bin_steps.append(binarize(var, var))
 	return bin_steps
 
+def norm_and_binarize(x):
+	x1 = tf.nn.batch_normalization(x, 0, 1, 0, 1, .0001)
+	x2 = tf.sign(tf.subtract(x1, .1))
+	return x2
+	
+
 # Define input and output
 x = tf.placeholder(tf.float32, shape=[None, 784])
 x_image = tf.reshape(x, [-1, 28, 28, 1])
@@ -38,34 +47,41 @@ conv2_size = 64
 W_scal1 = tf.Variable(1.0, trainable=False)
 W_conv1 = weight_variable([5, 5, 1, conv1_size])
 W_conv1_b = weight_variable([5, 5, 1, conv1_size])
-#b_conv1 = bias_variable([conv1_size])
+x_image_norm_b = norm_and_binarize(x_image)
 
-h_conv1 = tf.nn.dropout(tf.scalar_mul(W_scal1, conv2d(x_image, W_conv1_b)), 1)# + b_conv1)
+b_conv1 = bias_variable([conv1_size])
+
+h_conv1 = tf.nn.dropout(tf.scalar_mul(W_scal1, conv2d(x_image_norm_b, W_conv1_b)), 1)# + b_conv1)
 h_pool1 = max_pool_2x2(h_conv1)
+h_pool1_norm = norm_and_binarize(h_pool1)
 
 W_scal2 = tf.Variable(1.0, trainable=False)
 W_conv2 = weight_variable([5, 5, conv1_size, conv2_size])
 W_conv2_b = weight_variable([5, 5, conv1_size, conv2_size])
 #b_conv2 = bias_variable([conv2_size])
 
-h_conv2 = tf.nn.dropout(tf.scalar_mul(W_scal2, conv2d(h_pool1, W_conv2_b)), 1)# + b_conv2)
+h_conv2 = tf.nn.dropout(tf.scalar_mul(W_scal2, conv2d(h_pool1_norm, W_conv2_b)), 1)# + b_conv2)
 h_pool2 = max_pool_2x2(h_conv2)
+h_pool2_norm = norm_and_binarize(h_pool2)
 
 W_fc1 = weight_variable([7 * 7 * conv2_size, 1024])
 W_fc1_b = weight_variable([7 * 7 * conv2_size, 1024])
 #b_fc1 = bias_variable([1024])
 
-h_pool2_flat = tf.reshape(h_pool2, [-1, 7*7*conv2_size])
+h_pool2_flat = tf.reshape(h_pool2_norm, [-1, 7*7*conv2_size])
 h_fc1 = tf.nn.dropout(tf.matmul(h_pool2_flat, W_fc1_b), 1)# + b_fc1)
+h_fc1_norm = norm_and_binarize(h_fc1)
 
 keep_prob = tf.placeholder(tf.float32)
-h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+h_fc1_drop = tf.nn.dropout(h_fc1_norm, keep_prob)
 
 W_fc2 = weight_variable([1024, 10])
 W_fc2_b = weight_variable([1024, 10])
 #b_fc2 = bias_variable([10])
 
 y_conv = tf.matmul(h_fc1_drop, W_fc2_b)# + b_fc2
+
+h_test = h_pool2_norm
 
 # Create error function
 cross_entropy = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
@@ -94,16 +110,20 @@ step = opt.apply_gradients(grads_and_vars_new)
 
 
 
-# Binarize network
+# Binarize and scale weights
 scale_step1 = tf.assign(W_scal1, tf.scalar_mul((1.0/25.0), tf.norm(W_conv1)))
 scale_step2 = tf.assign(W_scal2, tf.scalar_mul((1.0/25.0), tf.norm(W_conv2)))
 
-#bin_steps = binarize_all()
 bin_steps = []
 bin_steps.append(binarize(W_conv1, W_conv1_b))
 bin_steps.append(binarize(W_conv2, W_conv2_b))
 bin_steps.append(binarize(W_fc1, W_fc1_b))
 bin_steps.append(binarize(W_fc2, W_fc2_b))
+
+# Normalize and binarize inputs
+bin_inputs = norm_and_binarize(W_conv1)
+
+
 
 #Define accuracy function
 correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
@@ -114,7 +134,7 @@ with tf.Session() as sess:
 	sess.run(tf.global_variables_initializer())
 	for qsy in range(1):
 		# Start training
-		for i in range(20000):
+		for i in range(40000):
 			# Get scale value and then binarize weights
 			sess.run(scale_step1)
 			sess.run(scale_step2)
@@ -126,9 +146,11 @@ with tf.Session() as sess:
 				print('step %d, training accuracy %g' % (i, train_accuracy))
 			sess.run(step, feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
 
-		print('test accuracy %g' % accuracy.eval(feed_dict={x: mnist.test.images[0:10000], y_: mnist.test.labels[0:10000], keep_prob: 1.0}))
-
-	
+		print('test accuracy %g' % accuracy.eval(feed_dict={x: mnist.test.images[0:5000], y_: mnist.test.labels[0:5000], keep_prob: 1.0}))
+		
+		#print("layer1: ", h_test.eval(feed_dict={x: mnist.test.images[0:1]}, session=sess))
+		
+		#print(sess.run(h_conv1,feed_dict={x: mnist.test.images[0], y_: mnist.test.labels[0], keep_prob: 1.0}))
 	#print(sess.run(W_conv1_b))
 	#print(sess.run(W_conv2_b))
 	#print(sess.run(W_fc1_b))
